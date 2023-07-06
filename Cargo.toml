@@ -1,0 +1,16 @@
+[package]
+name = "compressed-dir"
+version = "0.1.0"
+edition = "2021"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+env_logger = "0.10.0"
+flate2 = { version = "1.0.26", default-features = false, features = ["rust_backend"] }
+fuser = { version = "0.12.0", default-features = false, features = ["abi-7-31", "libfuse"] }
+libc = { version = "0.2.146", default-features = false, features = ["std", "extra_traits"] }
+log = { version = "0.4.19", default-features = false, features = ["std"] }
+sha2 = { version = "0.10.6", default-features = false, features = ["asm", "std"] }
+tar = { version = "0.4.38", default-features = false, features = ["xattr"] }
+
