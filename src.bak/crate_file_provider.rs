@@ -2,8 +2,10 @@ use std::{
     collections::HashMap,
     ffi::OsString,
     io::Read,
-    path::{Component, Path},
+    path::{Component, Path, PathBuf},
 };
+
+use crate::{DirChild, FuseFsImp};
 
 #[derive(Debug)]
 pub struct Tree {
@@ -165,5 +167,45 @@ impl CrateFileProvider {
             })
         }
         inner(path.as_ref())
+    }
+}
+
+pub struct DirChildIter {
+    inner: std::collections::hash_map::IntoValues<OsString, DirectoryChild>,
+}
+
+impl Iterator for DirChildIter {
+    type Item = DirChild<PathBuf>;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        self.inner.next().map(|v| match v {
+            DirectoryChild::Directory(dir) => DirChild::Dir(PathBuf::from(dir.name)),
+            DirectoryChild::File(file) => DirChild::File(PathBuf::from(file.name)),
+        })
+    }
+}
+
+impl FuseFsImp for CrateFileProvider {
+    type DirListing = DirChildIter;
+
+    type Path = PathBuf;
+
+    fn init(&mut self) -> Result<Self::Path, libc::c_int> {
+        self.tree.fill_tree(&mut self.storage);
+        dbg!(&self.tree);
+        Ok(PathBuf::from("/"))
+    }
+
+    fn list_files(&mut self, path: Self::Path) -> Option<Self::DirListing> {
+        self.tree.get(&path).map(|child| match child {
+            DirectoryChild::Directory(dir) => DirChildIter {
+                inner: dir.into_iter(),
+            },
+            DirectoryChild::File(_) => panic!("File found where directory expected"),
+        })
+    }
+
+    fn read_file(&mut self, path: Self::Path) -> Vec<u8> {
+        todo!()
     }
 }
