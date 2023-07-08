@@ -188,8 +188,6 @@ impl Iterator for DirChildIter {
 impl FuseFsImp for CrateFileProvider {
     type DirListing = DirChildIter;
 
-    type FileContents = std::io::Cursor<Vec<u8>>;
-
     type Path = PathBuf;
 
     fn init(&mut self) -> Result<Self::Path, libc::c_int> {
@@ -207,7 +205,7 @@ impl FuseFsImp for CrateFileProvider {
         })
     }
 
-    fn read_file(&mut self, path: Self::Path) -> Self::FileContents {
+    fn read_file(&mut self, path: Self::Path) -> Vec<u8> {
         todo!()
     }
 }

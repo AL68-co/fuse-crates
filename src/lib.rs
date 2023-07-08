@@ -4,8 +4,7 @@ use std::{
     collections::BTreeMap,
     ffi::OsStr,
     io::{Read, Seek},
-    path::{Path, PathBuf},
-    rc::{Rc, Weak},
+    path::PathBuf,
     time::UNIX_EPOCH,
 };
 
@@ -40,7 +39,6 @@ impl<P> InodeTreeItem<P> {
 
 pub trait FuseFsImp {
     type DirListing: Iterator<Item = DirChild<Self::Path>>;
-    type FileContents: Read + Seek;
     type Path: Clone + Into<PathBuf> + From<PathBuf>;
 
     /// Returns the root path
@@ -48,7 +46,7 @@ pub trait FuseFsImp {
 
     fn list_files(&mut self, path: Self::Path) -> Option<Self::DirListing>;
 
-    fn read_file(&mut self, path: Self::Path) -> Self::FileContents;
+    fn read_file(&mut self, path: Self::Path) -> Vec<u8>;
 }
 
 #[non_exhaustive]
@@ -181,26 +179,5 @@ where
         } else {
             reply.error(libc::ENOENT);
         }
-    }
-
-    fn lookup(
-        &mut self,
-        _req: &fuser::Request<'_>,
-        parent: u64,
-        name: &OsStr,
-        reply: fuser::ReplyEntry,
-    ) {
-        todo!()
-    }
-
-    fn readdir(
-        &mut self,
-        _req: &fuser::Request<'_>,
-        ino: u64,
-        fh: u64,
-        offset: i64,
-        reply: fuser::ReplyDirectory,
-    ) {
-        todo!()
     }
 }
