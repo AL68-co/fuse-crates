@@ -19,13 +19,11 @@ const BLKSIZE: u32 = 512;
 
 fn main() -> Result<()> {
     env_logger::init();
-    match std::process::Command::new("fusermount3")
+    std::process::Command::new("fusermount3")
         .args(["-u", "mount2"])
         .status()
-    {
-        Ok(_) => info!("Mount path successfully unmounted"),
-        Err(_) => info!("Did not unmount mount point, maybe it was already unmounted"),
-    }
+        .context("Unmounting path")?;
+    info!("Mount path successfully unmounted");
     let fs = FuseFs::new(
         "/home/gh-albertlarsan68/.cargo/registry/cache/index.crates.io-6f17d22bba15001f/",
     );
