@@ -1,3 +1,5 @@
+#![feature(int_roundings)]
+
 use std::{
     collections::BTreeMap,
     ffi::{OsStr, OsString},
@@ -5,20 +7,26 @@ use std::{
     time::{Duration, UNIX_EPOCH},
 };
 
+use anyhow::{Context, Result};
 use fuser::{FileAttr, FileType, Filesystem, MountOption};
 use libc::O_TRUNC;
-use log::{info, warn};
+use log::{error, info, warn};
 
 mod crate_file_provider;
 
 const DIR_FH: u64 = 200679;
 const FIL_FH: u64 = 220705;
+const BLOCK_SIZE: u32 = 512;
 
-fn main() {
+fn main() -> Result<()> {
     env_logger::init();
-    let _ = std::process::Command::new("fusermount3")
+    match std::process::Command::new("fusermount3")
         .args(["-u", "mount"])
-        .status();
+        .status()
+    {
+        Ok(_) => info!("Mount path successfully unmounted"),
+        Err(_) => info!("Did not unmount mount point, maybe it was already unmounted"),
+    }
     let fs = FuseFs::new(".");
     fuser::mount2(
         fs,
@@ -32,8 +40,8 @@ fn main() {
             MountOption::NoDev,
             MountOption::NoSuid,
         ],
-    )
-    .unwrap();
+    )?;
+    Ok(())
 }
 
 #[derive(Debug)]
@@ -64,6 +72,71 @@ impl FuseFs {
         self.next_inode += 1;
 
         ret
+    }
+
+    fn populate_crate(&mut self, crate_name: OsString) -> Result<()> {
+        let crate_file_path = self.path.join({
+            let mut c = crate_name.clone();
+            c.push(".crate");
+            c
+        });
+        let mut archive = tar::Archive::new(flate2::read::GzDecoder::new(
+            std::fs::File::open(crate_file_path.clone()).context("Opening file")?,
+        ));
+        for entry in archive.entries().context("Get entries")? {
+            let entry = entry.context("Unwrapping entry")?;
+            let entry_path = entry.path().context("Extracting path entry")?;
+            println!("{}", entry_path.display());
+            let components = entry_path.components().collect::<Vec<_>>();
+            let components_length = components.len();
+            let mut last_inode = fuser::FUSE_ROOT_ID;
+            for component in &components[0..components_length - 1] {
+                let last_last_inode = last_inode;
+                for child_inode in &self.inodes.get(&last_inode).unwrap().children {
+                    if self.inodes.get(child_inode).unwrap().name == component.as_os_str() {
+                        last_inode = *child_inode;
+                        break;
+                    }
+                }
+                if last_inode == last_last_inode {
+                    let new_inode = self.next_inode();
+                    let new_inode_object = Inode {
+                        attrs: FileAttr {
+                            ino: new_inode,
+                            ..Self::DIR_ATTR_TEMPLATE
+                        },
+                        children: vec![],
+                        name: component.as_os_str().to_os_string(),
+                    };
+                    self.inodes.insert(new_inode, new_inode_object);
+                    self.inodes
+                        .get_mut(&last_inode)
+                        .unwrap()
+                        .children
+                        .push(new_inode);
+                }
+            }
+            let file_name = components.last().unwrap().as_os_str();
+            let file_size = entry.header().size().context("File size")?;
+            let new_inode = self.next_inode();
+            let new_inode_object = Inode {
+                attrs: FileAttr {
+                    ino: new_inode,
+                    size: file_size,
+                    blocks: file_size.div_ceil(BLOCK_SIZE.into()),
+                    ..Self::FIL_ATTR_TEMPLATE
+                },
+                children: vec![],
+                name: file_name.to_os_string(),
+            };
+            self.inodes.insert(new_inode, new_inode_object);
+            self.inodes
+                .get_mut(&last_inode)
+                .unwrap()
+                .children
+                .push(new_inode);
+        }
+        Ok(())
     }
 
     const DIR_ATTR_TEMPLATE: FileAttr = FileAttr {
@@ -99,7 +172,7 @@ impl FuseFs {
         gid: 1063,
         rdev: 0,
         flags: 0,
-        blksize: 0,
+        blksize: BLOCK_SIZE,
     };
 }
 
@@ -120,7 +193,6 @@ impl Filesystem for FuseFs {
                 name: "".to_string().into(),
             },
         );
-        let mut inodes = vec![];
         for file in std::fs::read_dir(&self.path).unwrap() {
             let file = file.unwrap();
             if file.path().extension() != Some(OsStr::new("crate")) {
@@ -137,16 +209,16 @@ impl Filesystem for FuseFs {
                 children: vec![],
                 name: name.to_os_string(),
             };
-            inodes.push(inode);
             self.inodes.insert(inode, inode_object);
+            self.inodes
+                .get_mut(&fuser::FUSE_ROOT_ID)
+                .unwrap()
+                .children
+                .push(inode);
             log::debug!("Crate found: {}", name.to_string_lossy());
-            crate_file_provider::CrateFileProvider::new(file.path()).unwrap();
+            self.populate_crate(name.to_os_string()).unwrap();
+            log::debug!("Crate populated: {}", name.to_string_lossy());
         }
-        self.inodes
-            .get_mut(&fuser::FUSE_ROOT_ID)
-            .unwrap()
-            .children
-            .extend_from_slice(&inodes);
         info!("Init successful!");
         Ok(())
     }
@@ -204,9 +276,11 @@ impl Filesystem for FuseFs {
         mut reply: fuser::ReplyDirectory,
     ) {
         if !self.inodes.contains_key(&ino) {
+            error!("[readdir], (0x{ino:016x}) ENOENT");
             return reply.error(libc::ENOENT);
         }
         if fh != DIR_FH {
+            error!("[readdir], (0x{ino:016x}) ENOBADF");
             return reply.error(libc::EBADF);
         }
         if self.inodes.get(&ino).unwrap().attrs.kind != FileType::Directory {
