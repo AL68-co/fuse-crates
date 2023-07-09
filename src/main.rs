@@ -12,8 +12,6 @@ use fuser::{FileAttr, FileType, Filesystem, MountOption};
 use libc::O_TRUNC;
 use log::{error, info, warn};
 
-mod crate_file_provider;
-
 const DIR_FH: u64 = 200679;
 const FIL_FH: u64 = 220705;
 const BLOCK_SIZE: u32 = 512;
